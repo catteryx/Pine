@@ -1,0 +1,10 @@
+{
+  "name": "Pine",
+  "identifier": "app.pine",
+  "version": "0.1.0",
+  "out": "build",
+  "updates": {
+    "publicKey": "pf5hgs2d2/+TDoGq50p7CVoLK/DoQAi6FZipjBo9vTE=",
+    "github": "catteryx/Pine"
+  }
+}
