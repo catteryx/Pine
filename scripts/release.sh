@@ -9,9 +9,12 @@
 #   - the update signing key from `go tool mygo keygen`, in
 #     MYGO_UPDATER_PRIVATE_KEY or the default location below
 #
-# Signing and notarizing on this Mac: set macos.signingIdentity and
-# macos.notarize in mygo.json, or pass -sign and the like through to the
-# build, e.g.  scripts/release.sh -platform darwin/universal
+# Signing and notarizing never touch the repository: pass them in the
+# environment and they are injected into mygo.json only for the build.
+#
+#   MACOS_SIGNING_IDENTITY="Developer ID Application: Name (TEAMID)" \
+#   MACOS_NOTARY_PROFILE=notary \
+#     scripts/release.sh -platform darwin/universal
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -28,6 +31,25 @@ if [[ -z "${MYGO_UPDATER_PRIVATE_KEY:-}" ]]; then
 fi
 export MYGO_UPDATER_PRIVATE_KEY
 export GH_TOKEN="${GH_TOKEN:-$(gh auth token)}"
+
+# Inject the signing identity and notary profile for this build only.
+if [[ -n "${MACOS_SIGNING_IDENTITY:-}" || -n "${MACOS_NOTARY_PROFILE:-}" ]]; then
+  cp mygo.json mygo.json.bak
+  trap 'mv -f mygo.json.bak mygo.json' EXIT
+  python3 - <<'PY'
+import json, os
+c = json.load(open("mygo.json"))
+macos = c.get("macos", {})
+if os.environ.get("MACOS_SIGNING_IDENTITY"):
+    macos["signingIdentity"] = os.environ["MACOS_SIGNING_IDENTITY"]
+if os.environ.get("MACOS_NOTARY_PROFILE"):
+    macos["notarize"] = {"keychainProfile": os.environ["MACOS_NOTARY_PROFILE"]}
+if macos:
+    c["macos"] = macos
+json.dump(c, open("mygo.json", "w"), indent=2)
+open("mygo.json", "a").write("\n")
+PY
+fi
 
 go tool mygo build "$@" -upload
 
