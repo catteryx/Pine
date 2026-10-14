@@ -1,57 +1,32 @@
-# Pine
+<p align="center">
+  <img src="resources/icon.png" width="128" height="128" alt="Pine">
+</p>
 
-A desktop client for the [Pi coding agent](https://github.com/earendil-works/pi), built with
-[MyGo](https://github.com/egoist/mygo) native UI in pure Go.
+<h1 align="center">Pine</h1>
 
-Pine drives `pi --mode rpc` as a subprocess, one per session, and shows the conversation
-beside a full-height sidebar of sessions.
+<p align="center">A native desktop client for the <a href="https://github.com/earendil-works/pi">Pi coding agent</a>.</p>
+
+Pine gives Pi a focused desktop workspace. Your projects and conversations stay close at hand, answers stream in as readable Markdown, and tool calls, diffs and files open right beside the chat — so long coding sessions are easy to follow instead of scrolling away in a terminal.
+
+Pine is a client, not a replacement: it uses the Pi you already have, along with your existing sessions, models and providers.
 
 ## Features
 
-- **Sessions** in a resizable, searchable sidebar, grouped by working directory; they persist
-  across launches and reopen where you left them. Rename or delete from the sidebar.
-- **Transcript** with a Markdown renderer (headings, lists, tables, quotes, code with syntax
-  highlighting, inline styles, autolinks) and shared multi-line selection. Tool calls show
-  diffs, image results and path actions; thinking and tool calls fold into a "Worked for …"
-  disclosure once a run finishes.
-- **Slash commands**: a menu of client commands (`/new`, `/resume`, `/settings`, `/rename`,
-  `/compact`, `/clear`, `/stop`, `/bash`, `/skills`, `/mcp`, `/model`, `/thinking`, `/export`,
-  `/auto-compact`, `/auto-retry`, `/abort-retry`, `/steering`, `/follow-up`, `/help`) and Pi's
-  own prompt templates, skills and extension commands.
-- **Composer** with model and thinking pickers, drag-and-drop files (native macOS icons for
-  non-images), clipboard image paste, and Enter to send.
-- **MCP** and **Skills** pages in the sidebar.
-- **Context ring** with a token and cost popover; a Dock badge when a run finishes.
-- **Auto-updates** from signed GitHub releases.
+- **Sessions in a sidebar.** Every conversation lives in a resizable, searchable sidebar, grouped by project folder. Sessions persist and reopen where you left off; rename or delete them in place.
+- **A readable transcript.** Streamed Markdown with headings, lists, tables, quotes and syntax-highlighted code. Tool calls show diffs, image results and file actions, and thinking folds away once a run finishes.
+- **Slash commands.** A menu of built-in commands plus Pi's own prompt templates, skills and extension commands.
+- **A capable composer.** Pick the model and thinking level, drag in files (with native icons), paste screenshots, and press Enter to send.
+- **MCP and Skills.** Browse and manage your MCP servers and skills from the sidebar.
+- **Context at a glance.** A context ring with token and cost details, plus a Dock badge when a run finishes.
+- **Signed auto-updates.** New versions install themselves from signed GitHub releases.
 
-## Requirements
+## Install
 
-- Go 1.27 or later.
-- The Pi CLI (v1.0+) on your `PATH`, or `PI_BIN` set to it.
+Download the latest `.dmg` from the [Releases page](https://github.com/catteryx/Pine/releases), drag **Pine** into Applications, and open it.
 
-## Run
+Pine is a client for Pi, so install the [Pi CLI](https://github.com/earendil-works/pi) (v1.0+) first — Pine finds it automatically.
 
-```sh
-go run .
-```
-
-Set `PI_BIN` to use a specific `pi` binary:
-
-```sh
-PI_BIN=/path/to/pi go run .
-```
-
-## Build
-
-```sh
-go tool mygo build
-```
-
-Packaged apps go to `build/<os>-<arch>/`. To sign updates, give `mygo build` the update key:
-
-```sh
-MYGO_UPDATER_PRIVATE_KEY="$(cat ~/Library/Application\ Support/mygo/update-keys/mygo-update.key)" go tool mygo build
-```
+Requires macOS on Apple Silicon.
 
 ## License
 
