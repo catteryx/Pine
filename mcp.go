@@ -2,7 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"os/exec"
+
+	"github.com/rain/pi-client/internal/pi"
 )
 
 // mcpServer is one server from `pi mcp list --json`.
@@ -12,16 +13,13 @@ type mcpServer struct {
 	Tools []string `json:"tools"`
 }
 
-func piBin(piPath string) string {
-	if piPath == "" {
-		return "pi"
-	}
-	return piPath
-}
-
 // piMCPList runs `pi mcp list --json` and returns the servers and errors.
 func piMCPList(piPath string) ([]mcpServer, []string, error) {
-	out, err := exec.Command(piBin(piPath), "mcp", "list", "--json").Output()
+	cmd, err := pi.NewCommand(piPath, "mcp", "list", "--json")
+	if err != nil {
+		return nil, nil, err
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, nil, err
 	}

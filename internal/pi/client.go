@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,21 +67,15 @@ type Client struct {
 
 // Start launches pi in RPC mode and returns a connected client.
 func Start(opts Options) (*Client, error) {
-	path := opts.Path
-	if path == "" {
-		path = "pi"
-	}
-	resolved, err := exec.LookPath(path)
+	resolved, err := Resolve(opts.Path)
 	if err != nil {
-		return nil, fmt.Errorf("pi not found: %w", err)
+		return nil, err
 	}
 	args := append([]string{"--mode", "rpc"}, opts.Args...)
 	cmd := exec.Command(resolved, args...)
+	cmd.Env = childEnv(opts.Env, filepath.Dir(resolved))
 	if opts.Dir != "" {
 		cmd.Dir = opts.Dir
-	}
-	if opts.Env != nil {
-		cmd.Env = opts.Env
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -117,14 +112,13 @@ func Start(opts Options) (*Client, error) {
 // Probe runs `pi --version` and returns its output, to check a path before
 // starting a session.
 func Probe(ctx context.Context, path string) (string, error) {
-	if path == "" {
-		path = "pi"
-	}
-	resolved, err := exec.LookPath(path)
+	resolved, err := Resolve(path)
 	if err != nil {
-		return "", fmt.Errorf("pi not found: %w", err)
+		return "", err
 	}
-	out, err := exec.CommandContext(ctx, resolved, "--version").Output()
+	cmd := exec.CommandContext(ctx, resolved, "--version")
+	cmd.Env = childEnv(nil, filepath.Dir(resolved))
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
