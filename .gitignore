@@ -3,3 +3,6 @@
 mygo_windows_*.syso
 .DS_Store
 mygo.json.bak
+
+# Local release notes: names the signing identity and notarization profile.
+RELEASING.md
