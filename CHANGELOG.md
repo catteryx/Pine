@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- **One pi at a time instead of one per tab.** Only the session on screen and
+  sessions with a task still running keep their pi; switching away stops the
+  others, and showing a tab again resumes its session from its session file.
+  Tabs restored at launch wait for their turn, so a window with many open tabs
+  holds one pi rather than one per tab.
+- A tab that has not been started yet still shows its own title in the sidebar,
+  read from its session file.
+- Stopping a session no longer holds up the window while pi shuts down.
+
 ## 0.2.0
 
 - **Bundled pi runtime.** Pine ships a self-contained pi (compiled with Bun), so
