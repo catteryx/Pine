@@ -463,8 +463,17 @@ func (s *session) setModel(mo pi.Model) {
 		s.win().Update(func() {
 			s.state = state
 			s.levels = levels
+			// Remember the choice so new sessions start with it too.
+			s.rememberModel(mo.Provider, mo.ID)
 		})
 	}()
+}
+
+// rememberModel saves the chosen model as the default for new sessions.
+func (s *session) rememberModel(provider, id string) {
+	s.app.settings.Provider = provider
+	s.app.settings.Model = id
+	s.app.saveState()
 }
 
 func (s *session) setThinking(level string) {
@@ -477,7 +486,11 @@ func (s *session) setThinking(level string) {
 			s.win().Update(func() { s.addError("thinking level: " + err.Error()) })
 			return
 		}
-		s.win().Update(func() { s.state.ThinkingLevel = level })
+		s.win().Update(func() {
+			s.state.ThinkingLevel = level
+			s.app.settings.Thinking = level
+			s.app.saveState()
+		})
 	}()
 }
 

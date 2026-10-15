@@ -85,7 +85,7 @@ func (s *session) runCommand(name, args string) bool {
 	case "resume":
 		s.app.openSaved()
 	case "settings":
-		s.app.showSettings = true
+		s.app.openSettings()
 	case "rename":
 		if args == "" {
 			s.addError("usage: /rename <name>")
@@ -277,6 +277,7 @@ func (s *session) setModelByName(name string) {
 	s.win().Update(func() {
 		s.state = state
 		s.levels = levels
+		s.rememberModel(match.provider, match.id)
 	})
 }
 

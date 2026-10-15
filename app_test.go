@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"image"
+	"image/png"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,27 +25,87 @@ func testApp() (*app, *session) {
 	return a, s
 }
 
-func TestInlineSpans(t *testing.T) {
-	spans := inlineSpans("a **b** and `c` and *d*", customTheme(true))
+func TestInlineRuns(t *testing.T) {
+	runs := inlineRuns("a **b** and `c` and *d*")
 	var text string
 	var bold, code, italic bool
-	for _, s := range spans {
-		text += s.Text
-		if s.Weight == 700 {
+	for _, r := range runs {
+		text += r.text
+		if r.weight == 700 {
 			bold = true
 		}
-		if s.Font == "monospace" {
+		if r.code {
 			code = true
 		}
-		if s.Italic {
+		if r.italic {
 			italic = true
 		}
 	}
 	if text != "a b and c and d" {
-		t.Errorf("text = %q from %#v", text, spans)
+		t.Errorf("text = %q from %#v", text, runs)
 	}
 	if !bold || !code || !italic {
 		t.Errorf("styles bold=%v code=%v italic=%v", bold, code, italic)
+	}
+}
+
+func TestInlineRunsLinks(t *testing.T) {
+	runs := inlineRuns("see [the guide](https://example.com) and https://pi.dev")
+	var links []string
+	for _, r := range runs {
+		if r.url != "" {
+			links = append(links, r.text+" -> "+r.url)
+		}
+	}
+	want := []string{"the guide -> https://example.com", "https://pi.dev -> https://pi.dev"}
+	if !reflect.DeepEqual(links, want) {
+		t.Errorf("links = %#v, want %#v", links, want)
+	}
+}
+
+func TestImageLine(t *testing.T) {
+	alt, src, ok := imageLine(`![a cat](cat.png "title")`)
+	if !ok || alt != "a cat" || src != "cat.png" {
+		t.Fatalf("imageLine = %q %q %v", alt, src, ok)
+	}
+	if _, _, ok := imageLine("see ![a cat](cat.png)"); ok {
+		t.Fatal("imageLine matched a line with other text")
+	}
+}
+
+func TestSettingsViewRenders(t *testing.T) {
+	a, _ := testApp()
+	tt := ui.NewTester(a.settingsView, 560, 520)
+	for _, tab := range []int{settingsGeneral, settingsModel, settingsAppearance} {
+		a.settingsTab = tab
+		tt.Frame()
+	}
+}
+
+func TestRenderInlineWithLink(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		renderInline(c, customTheme(true), "see [the guide](https://example.com) now")
+	}, 400, 80)
+	tt.Frame()
+}
+
+func TestRenderMarkdownImage(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 4, 4))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pic.png"), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := testApp()
+	a.workdir = dir
+	tt := ui.NewTester(func(c *ui.Context) {
+		a.renderMarkdown(c, customTheme(true), "before\n\n![pic](pic.png)\n\nafter")
+	}, 500, 300)
+	tt.Frame()
+	if len(a.mdImages) == 0 {
+		t.Fatal("markdown image was not loaded")
 	}
 }
 

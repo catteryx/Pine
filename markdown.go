@@ -11,15 +11,16 @@ import (
 
 // renderMarkdown renders a useful subset of Markdown with native widgets:
 // headings, paragraphs with inline styling, lists, blockquotes, fenced code
-// blocks with syntax highlighting, and horizontal rules. One Selectable
-// container wraps it all, so a selection spans its paragraphs.
-func renderMarkdown(c *ui.Context, t *ui.Theme, src string) {
+// blocks with syntax highlighting, horizontal rules, tables, links and
+// images. One Selectable container wraps it all, so a selection spans its
+// paragraphs.
+func (a *app) renderMarkdown(c *ui.Context, t *ui.Theme, src string) {
 	ui.Column(c).Selectable().Gap(10).Children(func() {
-		renderMarkdownBody(c, t, src)
+		a.renderMarkdownBody(c, t, src)
 	})
 }
 
-func renderMarkdownBody(c *ui.Context, t *ui.Theme, src string) {
+func (a *app) renderMarkdownBody(c *ui.Context, t *ui.Theme, src string) {
 	lines := strings.Split(src, "\n")
 	i := 0
 	for i < len(lines) {
@@ -60,6 +61,11 @@ func renderMarkdownBody(c *ui.Context, t *ui.Theme, src string) {
 			i++
 			continue
 		}
+		if alt, src, ok := imageLine(trimmed); ok {
+			a.renderImage(c, t, alt, src)
+			i++
+			continue
+		}
 		if header, rows, next, ok := tableAt(lines, i); ok {
 			renderTable(c, t, header, rows)
 			i = next
@@ -95,6 +101,9 @@ func renderMarkdownBody(c *ui.Context, t *ui.Theme, src string) {
 			if _, _, _, ok := listItemLine(l); ok {
 				break
 			}
+			if _, _, ok := imageLine(tr); ok {
+				break
+			}
 			if len(para) > 0 {
 				if _, _, _, ok := tableAt(lines, i); ok {
 					break
@@ -123,6 +132,9 @@ func isPlainLine(trimmed string) bool {
 		return false
 	}
 	if _, _, _, ok := listItemLine(trimmed); ok {
+		return false
+	}
+	if _, _, ok := imageLine(trimmed); ok {
 		return false
 	}
 	return true
@@ -442,16 +454,27 @@ func renderCodeLines(c *ui.Context, t *ui.Theme, lang, code string) {
 	})
 }
 
-// inlineSpans parses inline Markdown into styled spans.
-func inlineSpans(s string, t *ui.Theme) []ui.Span {
-	var spans []ui.Span
+// inlineRun is a run of inline Markdown: styled text, or a link when url is
+// set.
+type inlineRun struct {
+	text   string
+	url    string
+	weight int
+	italic bool
+	strike bool
+	code   bool
+}
+
+// inlineRuns parses inline Markdown into styled text runs and links.
+func inlineRuns(s string) []inlineRun {
+	var runs []inlineRun
 	var b strings.Builder
 	weight, italic, strike := 0, false, false
 	flush := func() {
 		if b.Len() == 0 {
 			return
 		}
-		spans = append(spans, ui.Span{Text: b.String(), Weight: weight, Italic: italic, Strikethrough: strike})
+		runs = append(runs, inlineRun{text: b.String(), weight: weight, italic: italic, strike: strike})
 		b.Reset()
 	}
 	i := 0
@@ -477,52 +500,39 @@ func inlineSpans(s string, t *ui.Theme) []ui.Span {
 				continue
 			}
 			flush()
-			spans = append(spans, ui.Span{Text: s[i+1 : i+1+end], Font: "monospace", Background: chipBg(t)})
+			runs = append(runs, inlineRun{text: s[i+1 : i+1+end], code: true})
 			i += end + 2
 		case s[i] == '*':
 			flush()
 			italic = !italic
 			i++
-		case s[i] == '!' && strings.HasPrefix(s[i:], "!["):
-			close := strings.IndexByte(s[i+2:], ']')
-			if close >= 0 {
-				rest := s[i+2+close+1:]
-				if strings.HasPrefix(rest, "(") {
-					if end := strings.IndexByte(rest, ')'); end > 0 {
-						alt := s[i+2 : i+2+close]
-						if alt == "" {
-							alt = "image"
-						}
-						flush()
-						spans = append(spans, ui.Span{Text: "[image] " + alt, Color: t.TextMuted, Italic: true})
-						i += 2 + close + 1 + end + 1
-						continue
-					}
+		case strings.HasPrefix(s[i:], "!["):
+			if label, url, next, ok := linkParts(s, i+1); ok {
+				flush()
+				if label == "" {
+					label = url
 				}
+				runs = append(runs, inlineRun{text: label, url: url})
+				i = next
+				continue
 			}
 			b.WriteByte(s[i])
 			i++
 		case s[i] == '[':
-			close := strings.IndexByte(s[i:], ']')
-			if close > 0 {
-				rest := s[i+close+1:]
-				if strings.HasPrefix(rest, "(") {
-					if end := strings.IndexByte(rest, ')'); end > 0 {
-						flush()
-						spans = append(spans, ui.Span{Text: s[i+1 : i+close], Color: t.Accent, Underline: true})
-						i += close + 1 + end + 1
-						continue
-					}
-				}
+			if label, url, next, ok := linkParts(s, i); ok {
+				flush()
+				runs = append(runs, inlineRun{text: label, url: url})
+				i = next
+				continue
 			}
 			b.WriteByte(s[i])
 			i++
 		case s[i] == '<':
 			if end := strings.IndexByte(s[i:], '>'); end > 1 {
 				url := s[i+1 : i+end]
-				if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+				if isHTTPURL(url) {
 					flush()
-					spans = append(spans, ui.Span{Text: url, Color: t.Accent, Underline: true})
+					runs = append(runs, inlineRun{text: url, url: url})
 					i += end + 1
 					continue
 				}
@@ -530,15 +540,14 @@ func inlineSpans(s string, t *ui.Theme) []ui.Span {
 			b.WriteByte(s[i])
 			i++
 		default:
-			if (strings.HasPrefix(s[i:], "http://") || strings.HasPrefix(s[i:], "https://")) &&
-				(i == 0 || isURLBoundary(s[i-1])) {
+			if isHTTPURL(s[i:]) && (i == 0 || isURLBoundary(s[i-1])) {
 				j := i
 				for j < len(s) && !isURLEnd(s[j]) {
 					j++
 				}
 				url := s[i:j]
 				flush()
-				spans = append(spans, ui.Span{Text: url, Color: t.Accent, Underline: true})
+				runs = append(runs, inlineRun{text: url, url: url})
 				i = j
 				continue
 			}
@@ -547,14 +556,72 @@ func inlineSpans(s string, t *ui.Theme) []ui.Span {
 		}
 	}
 	flush()
-	if len(spans) == 0 {
-		return []ui.Span{{Text: s}}
+	if len(runs) == 0 {
+		return []inlineRun{{text: s}}
 	}
-	return spans
+	return runs
 }
 
+// linkParts parses "[label](url)" at i, returning the label, the URL and the
+// index just past the closing paren.
+func linkParts(s string, i int) (label, url string, next int, ok bool) {
+	if i >= len(s) || s[i] != '[' {
+		return "", "", 0, false
+	}
+	close := strings.IndexByte(s[i+1:], ']')
+	if close < 0 {
+		return "", "", 0, false
+	}
+	rest := s[i+1+close+1:]
+	if !strings.HasPrefix(rest, "(") {
+		return "", "", 0, false
+	}
+	end := strings.IndexByte(rest, ')')
+	if end < 0 {
+		return "", "", 0, false
+	}
+	url = strings.TrimSpace(rest[1:end])
+	// Drop an optional title: (url "title").
+	if space := strings.IndexAny(url, " \t"); space >= 0 {
+		url = url[:space]
+	}
+	url = strings.Trim(url, "<>")
+	if url == "" {
+		return "", "", 0, false
+	}
+	return s[i+1 : i+1+close], url, i + 1 + close + 1 + end + 1, true
+}
+
+// renderInline builds a paragraph of inline Markdown: styled text runs and
+// clickable links, so a link in a sentence opens in the browser.
 func renderInline(c *ui.Context, t *ui.Theme, s string) ui.Element {
-	return ui.RichText(c, inlineSpans(s, t)...)
+	runs := inlineRuns(s)
+	return ui.RichText(c).Children(func() {
+		for _, r := range runs {
+			if r.url != "" {
+				ui.Link(c, r.text, r.url)
+				continue
+			}
+			el := ui.Text(c, r.text)
+			if r.weight != 0 {
+				el.FontWeight(r.weight)
+			}
+			if r.italic {
+				el.Italic()
+			}
+			if r.strike {
+				el.Strikethrough()
+			}
+			if r.code {
+				el.Font("monospace").Background(chipBg(t))
+			}
+		}
+	})
+}
+
+// isHTTPURL reports whether s starts with an http or https scheme.
+func isHTTPURL(s string) bool {
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
 
 func isURLBoundary(b byte) bool {

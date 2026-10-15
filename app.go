@@ -37,8 +37,9 @@ type app struct {
 	mcpLoading       bool
 	mcpLoaded        bool
 	mcpErr           string
-	showSettings     bool
+	settingsWin      *mygo.Window
 	settings         settings
+	settingsTab      int
 	focused          bool
 	unread           int
 	preview          *ui.Bitmap // an image shown in the preview overlay
@@ -51,6 +52,12 @@ type app struct {
 	// fileIcons caches native file icons by extension.
 	fileIcons map[string]*ui.Bitmap
 	iconMu    sync.Mutex
+
+	// markdown images, cached by source: decoded from a file or fetched from
+	// a URL once.
+	mdImages   map[string]*ui.Bitmap
+	mdLoading  map[string]bool
+	mdImagesMu sync.Mutex
 
 	// Saved-session picker.
 	showSaved     bool
@@ -285,6 +292,7 @@ func (a *app) restore() {
 		a.sidebarW = state.SidebarW
 	}
 	a.settings = state.Settings
+	mygo.Theme.SetSource(appearanceSource(a.settings.Appearance))
 	if a.piPath == "" && a.settings.PiBin != "" {
 		a.piPath = a.settings.PiBin
 	}

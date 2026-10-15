@@ -54,6 +54,10 @@ func (a *app) setMenu() {
 			{Role: mygo.RoleAbout},
 			updater.MenuItem(),
 			mygo.Separator(),
+			{Label: "Settings…", Accelerator: "CmdOrCtrl+,", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.openSettings()
+			}},
+			mygo.Separator(),
 			{Role: mygo.RoleQuit},
 		}},
 		{Role: mygo.RoleEditMenu},

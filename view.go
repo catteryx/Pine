@@ -40,7 +40,6 @@ func (a *app) view(c *ui.Context) {
 	}
 	a.savedDialog(c, t)
 	a.infoDialog(c, t)
-	a.settingsDialog(c, t)
 	a.previewOverlay(c, t)
 }
 
@@ -708,7 +707,7 @@ func (s *session) renderAssistant(c *ui.Context, t *ui.Theme, e *entry) {
 			s.renderWorkedFor(c, t, e)
 			for i := range e.blocks {
 				if e.blocks[i].kind == blockText && strings.TrimSpace(e.blocks[i].text) != "" {
-					renderMarkdown(c, t, e.blocks[i].text)
+					s.app.renderMarkdown(c, t, e.blocks[i].text)
 				}
 			}
 		} else {
@@ -790,7 +789,7 @@ func (s *session) renderBlock(c *ui.Context, t *ui.Theme, e *entry, i int) {
 		if strings.TrimSpace(b.text) == "" {
 			return
 		}
-		renderMarkdown(c, t, b.text)
+		s.app.renderMarkdown(c, t, b.text)
 	case blockThinking:
 		if strings.TrimSpace(b.text) == "" {
 			return
