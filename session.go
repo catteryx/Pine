@@ -100,10 +100,21 @@ func newSession(a *app, workdir, resumePath string) *session {
 	// Keep the session file known before Pi reports it, so saving the open
 	// sessions never drops it.
 	s.state.SessionFile = resumePath
-	// A resumed session keeps the time its conversation actually started,
-	// so reopening a tab does not make it look brand new.
+	// A resumed session keeps the time its conversation actually started
+	// and its title, so a tab that is reopened without starting Pi still
+	// looks like itself.
 	if t := sessionStartTime(resumePath); !t.IsZero() {
 		s.createdAt = t
+	}
+	if resumePath != "" {
+		var info sessionInfo
+		readSessionMeta(resumePath, &info)
+		if info.title != "" {
+			s.title = info.title
+		}
+		if info.id != "" {
+			s.state.SessionID = info.id
+		}
 	}
 	return s
 }
@@ -178,9 +189,12 @@ func (s *session) connect() {
 			})
 			return
 		}
-		if !s.stale(gen) {
-			s.client.Store(c)
+		if s.stale(gen) {
+			// Closed or suspended while Pi started: nobody adopts it.
+			go c.Close()
+			return
 		}
+		s.client.Store(c)
 		s.loadInitial(gen, c)
 	}()
 }
@@ -231,11 +245,60 @@ func (s *session) loadInitial(gen int64, c *pi.Client) {
 	})
 }
 
+// disconnect stops this session's Pi. Close waits for the process to exit,
+// so it runs in the background and the window never blocks on it.
 func (s *session) disconnect() {
 	if c := s.client.Swap(nil); c != nil {
 		s.stopping.Store(true)
-		_ = c.Close()
+		go c.Close()
+		return
 	}
+	if s.starting.Load() {
+		// Pi is still starting: make that start stale, so the client it
+		// produces is closed instead of adopted.
+		s.gen.Add(1)
+		s.starting.Store(false)
+		s.stopping.Store(true)
+	}
+}
+
+// busy reports whether a task is in flight. A busy session keeps its Pi
+// however long it stays off screen, so background tasks keep running.
+func (s *session) busy() bool {
+	return s.running || s.streaming != nil || s.starting.Load()
+}
+
+// suspend stops the Pi of a session with nothing in flight. Working
+// sessions, and the one on screen, are the only ones that hold a Pi; the
+// rest start again when they are shown.
+func (s *session) suspend() {
+	if s.busy() {
+		return
+	}
+	s.disconnect()
+}
+
+// ensureLive starts Pi for a session that has none, continuing its session
+// file when it has one.
+func (s *session) ensureLive() {
+	if s.getClient() != nil || s.starting.Load() {
+		return
+	}
+	if s.state.SessionFile != "" {
+		s.resumePath = s.state.SessionFile
+	}
+	s.connect()
+}
+
+// reconnect restarts this session's pi, so credentials or the pi runtime a
+// setting changed take effect. The conversation resumes from its session
+// file when it has one.
+func (s *session) reconnect() {
+	s.disconnect()
+	if s.state.SessionFile != "" {
+		s.resumePath = s.state.SessionFile
+	}
+	s.connect()
 }
 
 func (s *session) shutdown() {

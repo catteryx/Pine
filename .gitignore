@@ -6,3 +6,6 @@ mygo.json.bak
 
 # Local release notes: names the signing identity and notarization profile.
 RELEASING.md
+
+# The embedded pi runtime, downloaded by scripts/bundle-pi.sh.
+/resources/pi/

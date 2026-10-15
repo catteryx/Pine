@@ -15,6 +15,7 @@ type settings struct {
 	Thinking   string  `json:"thinking,omitempty"`
 	SessionDir string  `json:"sessionDir,omitempty"`
 	PiBin      string  `json:"piBin,omitempty"`
+	PiSource   string  `json:"piSource,omitempty"`
 	Appearance string  `json:"appearance,omitempty"`
 	FontSize   float32 `json:"fontSize,omitempty"`
 }
@@ -100,9 +101,7 @@ func appearanceAt(index int) string {
 
 // applySettings makes the settings take effect and saves them.
 func (a *app) applySettings() {
-	if a.settings.PiBin != "" {
-		a.piPath = a.settings.PiBin
-	}
+	a.applyPiSettings()
 	mygo.Theme.SetSource(appearanceSource(a.settings.Appearance))
 	a.saveState()
 	if a.win != nil {
@@ -117,6 +116,7 @@ func (a *app) applySettings() {
 // shortcut: it opens the window the first time, and brings it forward after.
 func (a *app) openSettings() {
 	mygo.RunOnMain(func() {
+		a.loadProviderRows()
 		if a.settingsWin == nil || a.settingsWin.IsDestroyed() {
 			w := mygo.NewWindow(mygo.WindowOptions{
 				Title:                "Settings",
@@ -148,6 +148,7 @@ func (a *app) settingsView(c *ui.Context) {
 	c.SetTheme(a.themeFor(c.Theme().Dark))
 	t := c.Theme()
 	changed := false
+	hasBundle := bundledPiPath() != ""
 	bar := c.TitleBar()
 	// The page is a shade off the window in a light appearance, so the panel
 	// reads as a card on it, as macOS draws a group of settings.
@@ -166,14 +167,18 @@ func (a *app) settingsView(c *ui.Context) {
 				Gap(t.Space(3)).MaxWidth(720).Children(func() {
 				switch a.settingsTab {
 				case settingsModel:
+					a.providersSection(c, t)
+					ui.Text(c, "New session defaults").FontWeight(600).FontSize(t.FontSize + 1)
+					ui.Text(c, "The provider, model and thinking level new sessions start with; empty uses pi's default.").FontSize(t.FontSize - 1).TextColor(t.TextMuted)
+					providers, models := a.modelOptions()
 					settingsGroup(c, t, func() {
-						settingsRow(c, t, "Provider", "Sent to new sessions, e.g. anthropic.", func() {
-							if ui.TextInput(c, &a.settings.Provider).Placeholder("anthropic").Width(200).Changed() {
+						settingsRow(c, t, "Provider", "e.g. anthropic.", func() {
+							if ui.Combobox(c, &a.settings.Provider, providers).Placeholder("anthropic").Width(220).Changed() {
 								changed = true
 							}
 						})
 						settingsRow(c, t, "Model", "The model new sessions start with.", func() {
-							if ui.TextInput(c, &a.settings.Model).Placeholder("claude-sonnet-4").Width(200).Changed() {
+							if ui.Combobox(c, &a.settings.Model, models).Placeholder("claude-sonnet-4").Width(220).Changed() {
 								changed = true
 							}
 						})
@@ -216,7 +221,22 @@ func (a *app) settingsView(c *ui.Context) {
 					})
 				default:
 					settingsGroup(c, t, func() {
-						settingsRow(c, t, "Pi binary", "The pi CLI Pine runs. Leave empty to find it automatically.", func() {
+						// The runtime choice only matters in a build that ships one;
+						// a system-only build always runs the user's pi.
+						if hasBundle {
+							settingsRow(c, t, "Pi runtime", piSourceHint(a), func() {
+								index := piSourceIndex(a.settings.PiSource)
+								if ui.Segmented(c, &index, piSourceLabels...).Changed() {
+									a.settings.PiSource = piSourceAt(index)
+									changed = true
+								}
+							})
+						}
+						piBinDesc := "Optional path to a pi executable. Overrides the runtime above."
+						if !hasBundle {
+							piBinDesc = "The pi CLI Pine runs. Leave empty to find it on your PATH."
+						}
+						settingsRow(c, t, "Pi binary", piBinDesc, func() {
 							if ui.TextInput(c, &a.settings.PiBin).Placeholder("pi").Width(240).Changed() {
 								changed = true
 							}

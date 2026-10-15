@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/rain/pi-client/internal/pi"
@@ -341,6 +342,224 @@ func TestFirstLineAndHumanInt(t *testing.T) {
 	}
 	if got := humanInt(1500); got != "1.5k" {
 		t.Errorf("humanInt = %q", got)
+	}
+}
+
+func TestPiSource(t *testing.T) {
+	t.Setenv("PI_BIN", "")
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "pi")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(binDir, "pi")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "package.json"), []byte(`{"version":"9.9.9"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mygo.App.SetPath(mygo.PathResources, dir)
+	defer mygo.App.SetPath(mygo.PathResources, "")
+
+	a, _ := testApp()
+
+	a.settings.PiSource = piSourceSystem
+	a.applyPiSettings()
+	if a.piPath != "pi" {
+		t.Errorf("system piPath = %q, want \"pi\"", a.piPath)
+	}
+
+	a.settings.PiSource = piSourceBundled
+	a.applyPiSettings()
+	if a.piPath != bin {
+		t.Errorf("bundled piPath = %q, want %q", a.piPath, bin)
+	}
+
+	a.settings.PiSource = piSourceAuto
+	a.applyPiSettings()
+	if a.piPath != bin {
+		t.Errorf("auto piPath = %q, want bundled %q", a.piPath, bin)
+	}
+
+	a.settings.PiBin = "/custom/pi"
+	a.applyPiSettings()
+	if a.piPath != "/custom/pi" {
+		t.Errorf("custom piPath = %q, want /custom/pi", a.piPath)
+	}
+
+	if got := bundledPiVersion(); got != "9.9.9" {
+		t.Errorf("bundledPiVersion = %q, want 9.9.9", got)
+	}
+}
+
+func TestProviders(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", dir)
+
+	a, _ := testApp()
+	a.loadProviderRows()
+	if a.providerErr != "" {
+		t.Fatalf("providerErr = %q", a.providerErr)
+	}
+	if len(a.providerRows) != 0 {
+		t.Fatalf("rows = %d, want none", len(a.providerRows))
+	}
+
+	// Add a built-in provider, type a key, save it to auth.json.
+	a.addProvider("anthropic")
+	if len(a.providerRows) != 1 || !a.providerRows[0].fresh {
+		t.Fatalf("addProvider did not add a fresh row: %#v", a.providerRows)
+	}
+	a.providerRows[0].draftKey = "sk-test-123"
+	if err := a.saveProviders(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("auth.json mode = %v, want 0600", info.Mode().Perm())
+	}
+	a.loadProviderRows()
+	if len(a.providerRows) != 1 || a.providerRows[0].id != "anthropic" || a.providerRows[0].fresh {
+		t.Fatalf("after reload: %#v", a.providerRows)
+	}
+
+	// Add a custom endpoint: it goes to models.json.
+	a.addProvider(customMarker)
+	last := a.providerRows[len(a.providerRows)-1]
+	if !last.custom || !last.fresh {
+		t.Fatalf("custom row = %#v", last)
+	}
+	last.id = "ollama"
+	last.baseURL = "http://localhost:11434/v1"
+	last.api = "openai-completions"
+	last.models = []*modelRow{{id: "qwen2.5-coder:7b"}, {id: "llama3"}}
+	if err := a.saveProviders(); err != nil {
+		t.Fatal(err)
+	}
+	custom, err := readCustomProviders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := custom["ollama"]
+	if !ok {
+		t.Fatalf("ollama not written: %#v", custom)
+	}
+	if p.BaseURL != "http://localhost:11434/v1" || len(p.Models) != 2 {
+		t.Errorf("custom = %#v", p)
+	}
+
+	// Metadata of an existing model entry survives a save.
+	rich := `{"providers":{"ollama":{"baseUrl":"http://localhost:11434/v1","models":[{"id":"qwen2.5-coder:7b","name":"Qwen","cost":{"input":1}}]}}}`
+	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(rich), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.providerRows = nil
+	a.loadProviderRows()
+	if err := a.saveProviders(); err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		Providers map[string]struct {
+			Models []map[string]any `json:"models"`
+		} `json:"providers"`
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if ms := saved.Providers["ollama"].Models; len(ms) != 1 || ms[0]["name"] != "Qwen" {
+		t.Errorf("model metadata lost: %#v", ms)
+	}
+
+	// An OAuth entry Pine does not understand survives and keeps its kind.
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"),
+		[]byte(`{"radius":{"type":"oauth","refresh":"r","access":"a"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.providerRows = nil
+	a.loadProviderRows()
+	var radius *providerRow
+	for _, r := range a.providerRows {
+		if r.id == "radius" {
+			radius = r
+		}
+	}
+	if radius == nil || !radius.oauth {
+		t.Fatalf("radius oauth row = %#v", radius)
+	}
+	if err := a.saveProviders(); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := readCredentials()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := credentialKind(stored["radius"]); got != "oauth" {
+		t.Errorf("oauth entry lost: kind = %q", got)
+	}
+
+	// Removing the built-in credential deletes it.
+	if err := clearAuthRow("anthropic"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = readCredentials()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stored["anthropic"]; ok {
+		t.Error("anthropic was not cleared")
+	}
+}
+
+func TestProviderRowsRender(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", dir)
+	models := `{"providers":{"ollama":{"name":"Ollama","api":"openai-completions","baseUrl":"http://localhost:11434/v1","models":[{"id":"qwen2.5-coder:7b","contextWindow":32000}]}}}`
+	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(models), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a, _ := testApp()
+	a.loadProviderRows()
+	a.addProvider("anthropic")
+	a.addProvider(customMarker)
+	for _, r := range a.providerRows {
+		r.expanded = true
+	}
+
+	a.settingsTab = settingsModel
+	tt := ui.NewTester(a.settingsView, 560, 720)
+	tt.Frame()
+	if a.providerErr != "" {
+		t.Fatalf("providerErr = %q", a.providerErr)
+	}
+	if len(a.providerRows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(a.providerRows))
+	}
+
+	// A fetched list fills context windows when the endpoint reports them.
+	r := &providerRow{models: []*modelRow{{id: "qwen2.5-coder:7b"}}}
+	r.mergeModels([]fetchedModel{
+		{id: "qwen2.5-coder:7b", context: 32000, maxTokens: 8000},
+		{id: "llama3", context: 128000},
+	})
+	if len(r.models) != 2 {
+		t.Fatalf("merged %d models, want 2", len(r.models))
+	}
+	if m := r.models[0]; m.context != "32000" || m.maxTokens != "8000" {
+		t.Errorf("existing model = %#v", m)
+	}
+	if m := r.models[1]; m.id != "llama3" || m.context != "128000" {
+		t.Errorf("new model = %#v", m)
 	}
 }
 

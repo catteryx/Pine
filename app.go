@@ -40,6 +40,10 @@ type app struct {
 	settingsWin      *mygo.Window
 	settings         settings
 	settingsTab      int
+	providerRows     []*providerRow
+	providerLoaded   bool
+	providerErr      string
+	addChoice        string
 	focused          bool
 	unread           int
 	preview          *ui.Bitmap // an image shown in the preview overlay
@@ -157,7 +161,9 @@ func (a *app) activeSession() *session {
 
 // addSession opens a new session and makes it active.
 func (a *app) addSession(workdir, resumePath string) *session {
-	return a.addSessionAt(workdir, resumePath, time.Time{})
+	s := a.addSessionAt(workdir, resumePath, time.Time{})
+	s.ensureLive()
+	return s
 }
 
 // addSessionAt opens a new session and makes it active. A non-zero createdAt
@@ -174,7 +180,6 @@ func (a *app) addSessionAt(workdir, resumePath string, createdAt time.Time) *ses
 	a.sessions = append(a.sessions, s)
 	a.active = len(a.sessions) - 1
 	a.page = 0
-	s.connect()
 	a.saveState()
 	if a.win != nil {
 		a.win.Update(func() {})
@@ -202,6 +207,20 @@ func (a *app) switchTo(i int) {
 		a.active = i
 		a.page = 0
 	}
+	a.keepLive()
+}
+
+// keepLive starts Pi for the session on screen and stops it for every other
+// session with nothing in flight, so an open tab only holds a Pi while it is
+// running a task or actually being looked at.
+func (a *app) keepLive() {
+	for i, s := range a.sessions {
+		if i == a.active {
+			s.ensureLive()
+			continue
+		}
+		s.suspend()
+	}
 }
 
 func (a *app) closeSession(i int) {
@@ -219,6 +238,7 @@ func (a *app) closeSession(i int) {
 		a.active = len(a.sessions) - 1
 	}
 	a.saveState()
+	a.keepLive()
 }
 
 // --- persistence of the open sessions --------------------------------------
@@ -293,9 +313,7 @@ func (a *app) restore() {
 	}
 	a.settings = state.Settings
 	mygo.Theme.SetSource(appearanceSource(a.settings.Appearance))
-	if a.piPath == "" && a.settings.PiBin != "" {
-		a.piPath = a.settings.PiBin
-	}
+	a.applyPiSettings()
 	if !ok {
 		a.addSession(a.workdir, "")
 		return
@@ -316,6 +334,9 @@ func (a *app) restore() {
 	} else {
 		a.active = 0
 	}
+	// Only the tab on screen starts Pi now; the others start when they are
+	// first shown.
+	a.keepLive()
 }
 
 func (a *app) shutdown() {
